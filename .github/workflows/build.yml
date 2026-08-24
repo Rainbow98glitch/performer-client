@@ -1,4 +1,4 @@
-name: Build Python APK
+ name: Build Python APK
 
 on:
   push:
