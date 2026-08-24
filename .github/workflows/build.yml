@@ -12,21 +12,223 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Generate Complete App Structure
+        run: |
+          rm -rf app settings.gradle build.gradle
+          
+          mkdir -p app/src/main/java/com/performer/client
+          mkdir -p app/src/main/res/layout
 
-      - name: Build APK
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "PerformerClient"
+          include ':app'
+          EOF
+
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.1.1' apply false
+              id 'org.jetbrains.kotlin.android' version '1.8.10' apply false
+          }
+          EOF
+
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+
+          android {
+              namespace 'com.performer.client'
+              compileSdk 33
+
+              defaultConfig {
+                  applicationId "com.performer.client"
+                  minSdk 24
+                  targetSdk 33
+                  versionCode 1
+                  versionName "1.0"
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.10.1'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="Performer AV"
+                  android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="#000000">
+              <ImageView
+                  android:id="@+id/videoView"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitCenter" />
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="horizontal"
+                  android:padding="8dp"
+                  android:background="#80000000"
+                  android:layout_alignParentTop="true">
+                  <EditText
+                      android:id="@+id/ipInput"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:hint="IP Console"
+                      android:textColor="#FFFFFF"
+                      android:textColorHint="#AAAAAA"
+                      android:inputType="text"
+                      android:text="192.168.1.100" />
+                  <Button
+                      android:id="@+id/btnConnect"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Connect" />
+              </LinearLayout>
+          </RelativeLayout>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/performer/client/MainActivity.kt
+          package com.performer.client
+
+          import android.graphics.BitmapFactory
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.ImageView
+          import androidx.appcompat.app.AppCompatActivity
+          import java.net.Socket
+          import java.nio.ByteBuffer
+          import java.nio.ByteOrder
+
+          class MainActivity : AppCompatActivity() {
+              private lateinit var videoView: ImageView
+              private lateinit var ipInput: EditText
+              private lateinit var btnConnect: Button
+              private var socket: Socket? = null
+              private var isConnected = false
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  videoView = findViewById(R.id.videoView)
+                  ipInput = findViewById(R.id.ipInput)
+                  btnConnect = findViewById(R.id.btnConnect)
+
+                  btnConnect.setOnClickListener {
+                      if (!isConnected) {
+                          connectToConsole(ipInput.text.toString())
+                      } else {
+                          disconnect()
+                      }
+                  }
+              }
+
+              private fun connectToConsole(ip: String) {
+                  Thread {
+                      try {
+                          socket = Socket(ip, 36000)
+                          isConnected = true
+                          runOnUiThread { btnConnect.text = "Disconnect" }
+
+                          val inputStream = socket!!.getInputStream()
+                          val headerBuffer = ByteArray(28)
+
+                          while (isConnected) {
+                              var bytesRead = 0
+                              while (bytesRead < 28) {
+                                  val read = inputStream.read(headerBuffer, bytesRead, 28 - bytesRead)
+                                  if (read == -1) break
+                                  bytesRead += read
+                              }
+                              if (bytesRead < 28) break
+
+                              val bb = ByteBuffer.wrap(headerBuffer).order(ByteOrder.LITTLE_ENDIAN)
+                              val magic = bb.int
+                              val codec = bb.int
+                              val size = bb.int
+
+                              if (magic == 0x48593337) {
+                                  val payload = ByteArray(size)
+                                  var payloadRead = 0
+                                  while (payloadRead < size) {
+                                      val read = inputStream.read(payload, payloadRead, size - payloadRead)
+                                      if (read == -1) break
+                                      payloadRead += read
+                                  }
+
+                                  if (codec == 1) {
+                                      val bitmap = BitmapFactory.decodeByteArray(payload, 0, payload.size)
+                                      runOnUiThread { videoView.setImageBitmap(bitmap) }
+                                  }
+                              }
+                          }
+                      } catch (e: Exception) {
+                          e.printStackTrace()
+                      } finally {
+                          disconnect()
+                      }
+                  }.start()
+              }
+
+              private fun disconnect() {
+                  isConnected = false
+                  try { socket?.close() } catch (e: Exception) { }
+                  runOnUiThread { btnConnect.text = "Connect" }
+              }
+          }
+          EOF
+
+      - name: Build APK with Gradle
         run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: PerformerClient-APK
-          path: '**/*.apk'
+          path: app/build/outputs/apk/debug/app-debug.apk
           
