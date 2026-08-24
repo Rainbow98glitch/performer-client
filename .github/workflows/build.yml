@@ -12,7 +12,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Create App Structure
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Create App Structure Files
         run: |
           mkdir -p app/src/main/java/com/performer/client
           mkdir -p app/src/main/res/layout
@@ -23,7 +29,7 @@ jobs:
           buildscript {
               repositories { google(); mavenCentral() }
               dependencies { 
-                  classpath 'com.android.tools.build:gradle:7.4.2'
+                  classpath 'com.android.tools.build:gradle:8.1.1'
                   classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10'
               }
           }
@@ -66,14 +72,15 @@ jobs:
           </manifest>
           EOF
 
-      - name: Build Android APK
-        uses: apk-action/android-build-action@v1
+      - name: Setup and Build with Gradle
+        uses: gradle/gradle-build-action@v3
         with:
-          project-path: '.'
+          arguments: assembleDebug
+          generate-job-summary: false
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: PerformerClient-APK
-          path: '**/*.apk'
+          path: app/build/outputs/apk/debug/app-debug.apk
           
